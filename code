@@ -1,0 +1,41 @@
+   // ERROR HANDLING: 15-SECOND LOCKOUT
+    if (!req.session.loginAttempts) req.session.loginAttempts = 0;
+
+    if (req.session.loginAttempts >= 5) {
+        const timePassed = Date.now() - (req.session.lastAttemptTime || 0);
+        if (timePassed < 15000) {
+            const remaining = Math.ceil((15000 - timePassed) / 1000);
+            return res.render(template, {
+                error: `Too many attempts. Please wait ${remaining} seconds.`,
+                email: email || '',
+                password: password || '',
+                showVerificationInput: !!verification_code
+            });
+        } else {
+            req.session.loginAttempts = 0; // Reset after wait time
+        }
+    }
+
+    if (!email || !password) {
+        return res.render(template, { error: 'All fields required', email: email || '', password: password || '', showVerificationInput: false });
+    }
+
+    let connection;
+    try {
+        connection = await pool.getConnection();
+        const [users] = await connection.query('SELECT * FROM users WHERE email = ? AND role = ?', [email, role]);
+
+        if (users.length === 0) {
+            req.session.loginAttempts++;
+            req.session.lastAttemptTime = Date.now();
+            return res.render(template, { error: 'Invalid email or password', email, password: '', showVerificationInput: false });
+        }
+
+        const user = users[0];
+        const valid = await bcrypt.compare(password, user.password);
+
+        if (!valid) {
+            req.session.loginAttempts++;
+            req.session.lastAttemptTime = Date.now();
+            return res.render(template, { error: 'Invalid email or password', email, password: '', showVerificationInput: false });
+        }
